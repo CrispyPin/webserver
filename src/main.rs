@@ -105,18 +105,25 @@ fn get_file(request: Request) -> Option<Content> {
 }
 
 fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
-	let list = path
+	let mut dirs: Vec<_> = path
 		.read_dir()
 		.ok()?
 		.flatten()
-		.filter_map(|e| {
-			let target = e.file_name().to_str()?.to_string();
+		.filter_map(|d| {
+			let is_dir = d.file_type().ok()?.is_dir();
+			d.file_name().to_str().map(|s| (s.to_owned(), is_dir))
+		})
+		.collect();
+	dirs.sort_by(|(name_a, dir_a), (name_b, dir_b)| dir_b.cmp(dir_a).then(name_a.cmp(name_b)));
+	let list = dirs
+		.into_iter()
+		.filter_map(|(name, is_dir)| {
 			let mut s = format!(
-				"	<li><a href=\"{}\"> {}",
-				PathBuf::from(relative_path).join(&target).display(),
-				target
+				"		<li><a href=\"{}\">{}",
+				PathBuf::from(relative_path).join(&name).display(),
+				name
 			);
-			if e.file_type().ok()?.is_dir() {
+			if is_dir {
 				s.push('/');
 			}
 			s.push_str("</a></li>\n");
@@ -128,18 +135,15 @@ fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
 		});
 	let page = format!(
 		r#"<!DOCTYPE html>
-<html lang="en">
 <head>
 	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Index of {relative_path}</title>
 </head>
 <body>
 	<h3>Index of {relative_path}</h3>
 	<ul>
-	<li><a href="..">../</a></li>
-	{list}
-	</ul>
+		<li><a href="..">../</a></li>
+{list}	</ul>
 </body>
 </html>"#,
 	);
