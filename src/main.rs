@@ -1,6 +1,13 @@
-use std::io::prelude::*;
-use std::net::{TcpListener, TcpStream};
-use std::{env, fs};
+use std::{
+	env,
+	fs::{self, File},
+	io::{Read, Write},
+	net::{TcpListener, TcpStream},
+	path::{Path, PathBuf},
+};
+
+mod http;
+use http::{Content, Method, Request, Response, Status};
 
 fn main() {
 	let args: Vec<String> = env::args().collect();
@@ -35,9 +42,8 @@ fn handle_connection(mut stream: TcpStream) {
 	let request = String::from_utf8_lossy(&buffer);
 
 	let peer_addr = stream.peer_addr().ok();
-
 	println!(
-		"Received {} bytes from {:?}\n\n[{}]",
+		"Received {} bytes from {:?}\n=======\n{}=======\n\n",
 		size,
 		peer_addr,
 		request
@@ -47,51 +53,95 @@ fn handle_connection(mut stream: TcpStream) {
 			.replace("\\n", "\n")
 	);
 
-	let mut request = request.into_owned();
-	while request.contains("..") {
-		request = request.replace("..", "");
+	let request = Request::parse(&request);
+
+	let response;
+
+	if let Some(request) = request {
+		let head_only = request.method == Method::Head;
+		let path = request.path.clone();
+		response = get_file(request)
+			.map(|content| Response::new(Status::Ok).with_content(content))
+			.unwrap_or_else(|| {
+				Response::new(Status::NotFound)
+					.with_content(Content::text(format!("FILE NOT FOUND - '{}'", path)))
+			})
+			.format(head_only);
+	} else {
+		response = Response::new(Status::BadRequest).format(false);
 	}
 
-	if request.starts_with("GET") {
-		if let Some(file) = request.split_whitespace().nth(1) {
-			let path = format!("./{}", file);
-			send_file(&mut stream, &path);
-			return;
-		}
-	}
-	let response = "HTTP/1.1 400 BAD REQUEST\r\n\r\n";
 	stream
-		.write_all(response.as_bytes())
+		.write_all(&response)
 		.unwrap_or_else(|_| println!("failed to respond"));
 	stream
 		.flush()
 		.unwrap_or_else(|_| println!("failed to respond"));
 }
 
-fn send_file(stream: &mut TcpStream, path: &str) {
-	if let Ok(text) = fs::read_to_string(path) {
-		let contents = text + "\n\n";
-		let response = format!(
-			"HTTP/1.1 200 OK\r\nContent-Type: {}; charset=UTF-8\r\nContent-Length: {}\r\n\r\n{}",
-			if path.ends_with(".html") {
-				"text/html"
-			} else {
-				"text/plain"
-			},
-			contents.len(),
-			contents
-		);
-		stream
-			.write_all(response.as_bytes())
-			.unwrap_or_else(|_| println!("failed to respond"));
+fn get_file(request: Request) -> Option<Content> {
+	let path = PathBuf::from(format!("./{}", &request.path))
+		.canonicalize()
+		.ok()?;
+	if path.strip_prefix(env::current_dir().unwrap()).is_err() {
+		return None;
+	}
+
+	if path.is_dir() {
+		let index_file = path.join("index.html");
+		if index_file.is_file() {
+			Some(Content::html(fs::read_to_string(index_file).ok()?))
+		} else {
+			generate_index(&request.path, &path)
+		}
+	} else if path.is_file() {
+		let ext = path.extension().unwrap_or_default().to_str()?;
+		let mut buf = Vec::new();
+		File::open(&path).ok()?.read_to_end(&mut buf).ok()?;
+		Some(Content::file(ext, buf))
 	} else {
-		eprintln!("File does not exist: {}", path);
-		let response = format!("HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Length: {}\r\n\r\n{}", path.len(), path);
-		stream
-			.write_all(response.as_bytes())
-			.unwrap_or_else(|_| println!("failed to respond with 404"));
-	};
-	stream
-		.flush()
-		.unwrap_or_else(|_| println!("failed to respond"));
+		None
+	}
+}
+
+fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
+	let list = path
+		.read_dir()
+		.ok()?
+		.flatten()
+		.filter_map(|e| {
+			let target = e.file_name().to_str()?.to_string();
+			let mut s = format!(
+				"	<li><a href=\"{}\"> {}",
+				PathBuf::from(relative_path).join(&target).display(),
+				target
+			);
+			if e.file_type().ok()?.is_dir() {
+				s.push('/');
+			}
+			s.push_str("</a></li>\n");
+			Some(s)
+		})
+		.fold(String::new(), |mut content, entry| {
+			content.push_str(&entry);
+			content
+		});
+	let page = format!(
+		r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Index of {relative_path}</title>
+</head>
+<body>
+	<h3>Index of {relative_path}</h3>
+	<ul>
+	<li><a href="..">../</a></li>
+	{list}
+	</ul>
+</body>
+</html>"#,
+	);
+	Some(Content::html(page))
 }
