@@ -1,13 +1,15 @@
 use std::{
 	env,
 	fs::{self, File},
-	io::{Read, Write},
+	io::{BufReader, Read, Seek, Write},
 	net::{TcpListener, TcpStream},
+	os::unix::fs::MetadataExt,
 	path::{Path, PathBuf},
+	thread,
 };
 
 mod http;
-use http::{Content, Method, Request, Response, Status};
+use http::{Content, Method, Request, RequestRange, Response, Status};
 
 fn main() {
 	let args: Vec<String> = env::args().collect();
@@ -21,47 +23,76 @@ fn main() {
 
 	let listener = TcpListener::bind(host).expect("Could not bind to address");
 
+	let mut threads = Vec::new();
+
 	for stream in listener.incoming() {
 		match stream {
-			Ok(stream) => handle_connection(stream),
+			Ok(stream) => threads.push(thread::spawn(|| handle_connection(stream))),
 			Err(err) => println!("Error with incoming stream: {}", err),
 		}
+		threads = threads.into_iter().filter(|j| !j.is_finished()).collect();
+		println!("{} threads open", threads.len());
 	}
 }
 
 fn handle_connection(mut stream: TcpStream) {
-	let mut buffer = vec![0; 2048];
-	let size = if let Ok(size) = stream.read(&mut buffer) {
-		size
-	} else {
+	let Ok(peer_addr) = stream.peer_addr() else {
 		return;
 	};
+	println!("#### new connection from {peer_addr}");
 
-	buffer.resize(size, 0);
+	let mut buffer = Vec::with_capacity(2048);
+	loop {
+		let mut b = vec![0; 512];
+		let Ok(size) = stream.read(&mut b) else {
+			println!("failed to read ");
+			return;
+		};
+		if size == 0 {
+			println!("nothing read");
+			return;
+		}
+		b.truncate(size);
+		buffer.extend_from_slice(&b);
 
-	let request = String::from_utf8_lossy(&buffer);
+		if buffer.len() > 4096 {
+			println!("request too long");
+			return;
+		}
+		if buffer.ends_with(b"\r\n\r\n") {
+			let request = String::from_utf8_lossy(&buffer).to_string();
+			// println!("Received {} bytes from {}", buffer.len(), peer_addr);
+			// println!(
+			// 	"=======\n{}=======\n\n",
+			// 	request
+			// 		.escape_debug()
+			// 		.collect::<String>()
+			// 		.replace("\\r\\n", "\n")
+			// 		.replace("\\n", "\n")
+			// );
+			if handle_request(request, &mut stream) {
+				println!("closing connection");
+				return;
+			}
+			// println!("keeping connection");
+			buffer.clear();
+		}
+	}
+}
 
-	let peer_addr = stream.peer_addr().ok();
-	println!(
-		"Received {} bytes from {:?}\n=======\n{}=======\n\n",
-		size,
-		peer_addr,
-		request
-			.escape_debug()
-			.collect::<String>()
-			.replace("\\r\\n", "\n")
-			.replace("\\n", "\n")
-	);
-
+fn handle_request(request: String, stream: &mut TcpStream) -> bool {
 	let request = Request::parse(&request);
-
 	let response;
+	let mut end_connection = true;
 
 	if let Some(request) = request {
 		let head_only = request.method == Method::Head;
 		let path = request.path.clone();
 		response = get_file(request)
-			.map(|content| Response::new(Status::Ok).with_content(content))
+			.map(|(content, end_of_file)| {
+				end_connection = end_of_file;
+				Response::new(Status::Ok).with_content(content)
+			})
 			.unwrap_or_else(|| {
 				Response::new(Status::NotFound)
 					.with_content(Content::text(format!("FILE NOT FOUND - '{}'", path)))
@@ -76,10 +107,13 @@ fn handle_connection(mut stream: TcpStream) {
 		.unwrap_or_else(|_| println!("failed to respond"));
 	stream
 		.flush()
-		.unwrap_or_else(|_| println!("failed to respond"));
+		.unwrap_or_else(|_| println!("failed to flush"));
+	end_connection
 }
 
-fn get_file(request: Request) -> Option<Content> {
+fn get_file(request: Request) -> Option<(Content, bool)> {
+	const MAX_SIZE: usize = 1024 * 1024 * 8;
+
 	let path = PathBuf::from(format!("./{}", &request.path))
 		.canonicalize()
 		.ok()?;
@@ -90,15 +124,36 @@ fn get_file(request: Request) -> Option<Content> {
 	if path.is_dir() {
 		let index_file = path.join("index.html");
 		if index_file.is_file() {
-			Some(Content::html(fs::read_to_string(index_file).ok()?))
+			Some((Content::html(fs::read_to_string(index_file).ok()?), true))
 		} else {
-			generate_index(&request.path, &path)
+			generate_index(&request.path, &path).map(|c| (c, true))
 		}
 	} else if path.is_file() {
 		let ext = path.extension().unwrap_or_default().to_str()?;
-		let mut buf = Vec::new();
-		File::open(&path).ok()?.read_to_end(&mut buf).ok()?;
-		Some(Content::file(ext, buf))
+		let file = File::open(&path).ok()?;
+		let size = file.metadata().ok()?.size() as usize;
+
+		let mut buf = vec![0; MAX_SIZE];
+		let mut reader = BufReader::new(file);
+		let start_pos = match request.range {
+			Some(RequestRange::From(p)) => p,
+			Some(RequestRange::Full(start, _end)) => start,
+			_ => 0,
+		};
+		reader
+			.seek(std::io::SeekFrom::Start(start_pos as u64))
+			.ok()?;
+
+		let size_read = reader.read(&mut buf).ok()?;
+		buf.truncate(size_read);
+		let mut end_of_file = false;
+		let range = if size_read < size {
+			end_of_file = start_pos + size_read == size;
+			Some((start_pos, start_pos + size_read - 1, size))
+		} else {
+			None
+		};
+		Some((Content::file(ext, buf).with_range(range), end_of_file))
 	} else {
 		None
 	}

@@ -3,11 +3,11 @@ pub struct Request {
 	pub method: Method,
 	pub path: String,
 	pub host: String,
-	pub range: Option<ContentRange>,
+	pub range: Option<RequestRange>,
 }
 
 #[derive(Debug)]
-pub enum ContentRange {
+pub enum RequestRange {
 	From(usize),
 	Full(usize, usize),
 	Suffix(usize),
@@ -36,6 +36,7 @@ pub enum Status {
 #[derive(Debug, Clone)]
 pub struct Content {
 	content_type: &'static str,
+	range: Option<(usize, usize, usize)>,
 	bytes: Vec<u8>,
 }
 
@@ -58,7 +59,7 @@ impl Request {
 			let (key, value) = line.split_once(": ")?;
 			match key {
 				"host" => host = Some(value.to_owned()),
-				"range" => range = ContentRange::parse(value),
+				"range" => range = RequestRange::parse(value),
 				_ => (),
 			}
 		}
@@ -83,19 +84,29 @@ impl Response {
 		}
 	}
 
-	pub fn format(self, head_only: bool) -> Vec<u8> {
+	pub fn format(mut self, head_only: bool) -> Vec<u8> {
 		if let Some(content) = self.content {
-			let mut data = format!(
-				"{}\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n",
+			if content.range.is_some() {
+				self.status = Status::PartialContent;
+			}
+			//do i need accept-ranges?
+			let mut buffer = format!(
+				"{}\r\nContent-Type: {}\r\nAccept-Ranges: bytes\r\nContent-Length: {}\r\n",
 				self.status.header(),
 				content.content_type,
 				content.bytes.len(),
 			)
 			.into_bytes();
-			if !head_only {
-				data.extend_from_slice(&content.bytes);
+			if let Some((start, end, size)) = content.range {
+				buffer.extend_from_slice(
+					format!("Content-Range: bytes {}-{}/{}\r\n", start, end, size).as_bytes(),
+				)
 			}
-			data
+			buffer.extend_from_slice(b"\r\n");
+			if !head_only {
+				buffer.extend_from_slice(&content.bytes);
+			}
+			buffer
 		} else {
 			format!("{}\r\n\r\n", self.status.header()).into_bytes()
 		}
@@ -158,8 +169,14 @@ impl Content {
 		};
 		Self {
 			content_type,
+			range: None,
 			bytes,
 		}
+	}
+
+	pub fn with_range(mut self, range: Option<(usize, usize, usize)>) -> Self {
+		self.range = range;
+		self
 	}
 }
 
@@ -175,8 +192,8 @@ impl Status {
 	pub fn name(self) -> &'static str {
 		match self {
 			Status::Ok => "OK",
-			Status::PartialContent => "",
-			Status::BadRequest => "",
+			Status::PartialContent => "PARTIAL CONTENT",
+			Status::BadRequest => "BAD REQUEST",
 			Status::NotFound => "NOT FOUND",
 		}
 	}
@@ -192,7 +209,7 @@ impl Method {
 	}
 }
 
-impl ContentRange {
+impl RequestRange {
 	fn parse(source: &str) -> Option<Self> {
 		let source = source.strip_prefix("bytes=")?;
 		let (start, end) = source.split_once('-')?;
