@@ -27,9 +27,9 @@ fn main() {
 	for stream in listener.incoming() {
 		match stream {
 			Ok(stream) => threads.push(thread::spawn(|| handle_connection(stream))),
-			Err(err) => println!("Error with incoming stream: {}", err),
+			Err(err) => println!("Error with incoming stream: {err}"),
 		}
-		threads = threads.into_iter().filter(|j| !j.is_finished()).collect();
+		threads.retain(|j| !j.is_finished());
 		println!("{} connections open", threads.len());
 	}
 }
@@ -71,7 +71,7 @@ fn handle_connection(mut stream: TcpStream) {
 			// 		.replace("\\r\\n", "\n")
 			// 		.replace("\\n", "\n")
 			// );
-			if handle_request(request, &mut stream) {
+			if handle_request(&request, &mut stream) {
 				println!("[{client_ip}] closing connection");
 				return;
 			}
@@ -80,11 +80,11 @@ fn handle_connection(mut stream: TcpStream) {
 	}
 }
 
-fn handle_request(request: String, stream: &mut TcpStream) -> bool {
+fn handle_request(request: &str, stream: &mut TcpStream) -> bool {
 	let Ok(client_ip) = stream.peer_addr() else {
 		return true;
 	};
-	let request = Request::parse(&request);
+	let request = Request::parse(request);
 	let response;
 	let mut end_connection = true;
 
@@ -92,7 +92,7 @@ fn handle_request(request: String, stream: &mut TcpStream) -> bool {
 		println!("[{client_ip}] {} {}", request.method, request.path);
 		let head_only = request.method == Method::Head;
 		let path = request.path.clone();
-		response = get_file(request)
+		response = get_file(&request)
 			.map(|(content, end_of_file)| {
 				end_connection = end_of_file;
 				println!("[{client_ip}] sending file content");
@@ -101,7 +101,7 @@ fn handle_request(request: String, stream: &mut TcpStream) -> bool {
 			.unwrap_or_else(|| {
 				println!("[{client_ip}] file not found");
 				Response::new(Status::NotFound)
-					.with_content(Content::text(format!("404 NOT FOUND - '{}'", path)))
+					.with_content(Content::text(format!("404 NOT FOUND - '{path}'")))
 			})
 			.format(head_only);
 	} else {
@@ -115,7 +115,7 @@ fn handle_request(request: String, stream: &mut TcpStream) -> bool {
 	end_connection
 }
 
-fn get_file(request: Request) -> Option<(Content, bool)> {
+fn get_file(request: &Request) -> Option<(Content, bool)> {
 	const MAX_SIZE: usize = 1024 * 1024 * 8;
 
 	let current_dir = env::current_dir().unwrap();
@@ -177,31 +177,37 @@ fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
 		.ok()?
 		.flatten()
 		.filter_map(|d| {
-			let is_dir = d.file_type().ok()?.is_dir();
-			d.file_name().to_str().map(|s| (s.to_owned(), is_dir))
+			let size = if d.file_type().ok()?.is_dir() {
+				None
+			} else {
+				Some(d.metadata().ok()?.len())
+			};
+
+			d.file_name().to_str().map(|s| (s.to_owned(), size))
 		})
 		.collect();
-	dirs.sort_by(|(name_a, dir_a), (name_b, dir_b)| dir_b.cmp(dir_a).then(name_a.cmp(name_b)));
+	dirs.sort_by(|(name_a, size_a), (name_b, size_b)| {
+		size_a
+			.is_some()
+			.cmp(&size_b.is_some())
+			.then(name_a.cmp(name_b))
+	});
 	let list = dirs
 		.into_iter()
-		.filter_map(|(name, is_dir)| {
-			let mut s = format!(
-				"		<li><a href=\"{}\">{}",
-				PathBuf::from(relative_path).join(&name).display(),
-				name
-			);
-			if is_dir {
-				s.push('/');
-			}
-			s.push_str("</a></li>\n");
-			Some(s)
+		.map(|(name, size)| {
+			let formatted_size = size.map(format_size).unwrap_or_default();
+			format!(
+				"<tr><td><a href=\"{href}\">{name}{trailing_slash}</a></td><td>{formatted_size}</td></tr>\n",
+				href = PathBuf::from(relative_path).join(&name).display(),
+				trailing_slash = if size.is_some() { "" } else { "/" },
+			)
 		})
 		.fold(String::new(), |mut content, entry| {
 			content.push_str(&entry);
 			content
 		});
 	let parent = if relative_path != "/" {
-		r#"		<li><a href="..">../</a></li>"#
+		"<tr><td><a href=\"..\">../</a></td><td></td></tr>"
 	} else {
 		""
 	};
@@ -210,13 +216,31 @@ fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
 <head>
 	<meta charset="UTF-8">
 	<title>Index of {relative_path}</title>
+	<style>
+		html {{ color-scheme: dark; }}
+		tr:nth-child(odd) {{ background-color: #333; }}
+	</style>
 </head>
 <body>
 	<h3>Index of {relative_path}</h3>
-	<ul>
-{parent}{list}	</ul>
+	<table>
+{parent}
+{list}
+	</table>
 </body>
 </html>"#,
 	);
 	Some(Content::html(page))
+}
+
+fn format_size(bytes: u64) -> String {
+	if bytes < 1024 {
+		format!("{bytes} B")
+	} else if bytes < 1024 * 1024 {
+		format!("{:.1} KiB", bytes as f64 / 1024.0)
+	} else if bytes < 1024 * 1024 * 1024 {
+		format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
+	} else {
+		format!("{:.1} GiB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+	}
 }

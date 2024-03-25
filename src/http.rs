@@ -35,7 +35,7 @@ pub enum Status {
 
 #[derive(Debug, Clone)]
 pub struct Content {
-	content_type: &'static str,
+	mime_type: &'static str,
 	range: Option<(usize, usize, usize)>,
 	bytes: Vec<u8>,
 }
@@ -93,14 +93,14 @@ impl Response {
 			let mut buffer = format!(
 				"{}\r\nContent-Type: {}\r\nAccept-Ranges: bytes\r\nContent-Length: {}\r\n",
 				self.status.header(),
-				content.content_type,
+				content.mime_type,
 				content.bytes.len(),
 			)
 			.into_bytes();
 			if let Some((start, end, size)) = content.range {
 				buffer.extend_from_slice(
-					format!("Content-Range: bytes {}-{}/{}\r\n", start, end, size).as_bytes(),
-				)
+					format!("Content-Range: bytes {start}-{end}/{size}\r\n").as_bytes(),
+				);
 			}
 			buffer.extend_from_slice(b"\r\n");
 			if !head_only {
@@ -168,7 +168,7 @@ impl Content {
 			}
 		};
 		Self {
-			content_type,
+			mime_type: content_type,
 			range: None,
 			bytes,
 		}
