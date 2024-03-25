@@ -3,7 +3,6 @@ use std::{
 	fs::{self, File},
 	io::{BufReader, Read, Seek, Write},
 	net::{TcpListener, TcpStream},
-	os::unix::fs::MetadataExt,
 	path::{Path, PathBuf},
 	thread,
 };
@@ -131,7 +130,7 @@ fn get_file(request: Request) -> Option<(Content, bool)> {
 	} else if path.is_file() {
 		let ext = path.extension().unwrap_or_default().to_str()?;
 		let file = File::open(&path).ok()?;
-		let size = file.metadata().ok()?.size() as usize;
+		let size = file.metadata().ok()?.len() as usize;
 
 		let mut buf = vec![0; MAX_SIZE];
 		let mut reader = BufReader::new(file);
