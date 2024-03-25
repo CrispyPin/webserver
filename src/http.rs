@@ -13,7 +13,7 @@ pub enum RequestRange {
 	Suffix(usize),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Method {
 	Get,
 	Head,
@@ -205,6 +205,15 @@ impl Method {
 			"GET" => Some(Self::Get),
 			"HEAD" => Some(Self::Head),
 			_ => None,
+		}
+	}
+}
+
+impl std::fmt::Display for Method {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Method::Get => write!(f, "GET"),
+			Method::Head => write!(f, "HEAD"),
 		}
 	}
 }

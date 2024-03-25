@@ -30,37 +30,39 @@ fn main() {
 			Err(err) => println!("Error with incoming stream: {}", err),
 		}
 		threads = threads.into_iter().filter(|j| !j.is_finished()).collect();
-		println!("{} threads open", threads.len());
+		println!("{} connections open", threads.len());
 	}
 }
 
 fn handle_connection(mut stream: TcpStream) {
-	let Ok(peer_addr) = stream.peer_addr() else {
+	const MAX_REQUEST_SIZE: usize = 1024 * 4;
+	let Ok(client_ip) = stream.peer_addr() else {
 		return;
 	};
-	println!("#### new connection from {peer_addr}");
+	println!("[{client_ip}] new connection");
 
 	let mut buffer = Vec::with_capacity(2048);
 	loop {
 		let mut b = vec![0; 512];
 		let Ok(size) = stream.read(&mut b) else {
-			println!("failed to read ");
+			println!("[{client_ip}] connection broken");
 			return;
 		};
 		if size == 0 {
-			println!("nothing read");
+			println!("[{client_ip}] connection closed by client");
 			return;
 		}
 		b.truncate(size);
 		buffer.extend_from_slice(&b);
 
-		if buffer.len() > 4096 {
-			println!("request too long");
+		if buffer.len() > MAX_REQUEST_SIZE {
+			println!("[{client_ip}] request over {MAX_REQUEST_SIZE} bytes, closing connection");
 			return;
 		}
 		if buffer.ends_with(b"\r\n\r\n") {
 			let request = String::from_utf8_lossy(&buffer).to_string();
-			// println!("Received {} bytes from {}", buffer.len(), peer_addr);
+
+			println!("[{client_ip}] received {} bytes", buffer.len());
 			// println!(
 			// 	"=======\n{}=======\n\n",
 			// 	request
@@ -70,43 +72,46 @@ fn handle_connection(mut stream: TcpStream) {
 			// 		.replace("\\n", "\n")
 			// );
 			if handle_request(request, &mut stream) {
-				println!("closing connection");
+				println!("[{client_ip}] closing connection");
 				return;
 			}
-			// println!("keeping connection");
 			buffer.clear();
 		}
 	}
 }
 
 fn handle_request(request: String, stream: &mut TcpStream) -> bool {
+	let Ok(client_ip) = stream.peer_addr() else {
+		return true;
+	};
 	let request = Request::parse(&request);
 	let response;
 	let mut end_connection = true;
 
 	if let Some(request) = request {
+		println!("[{client_ip}] {} {}", request.method, request.path);
 		let head_only = request.method == Method::Head;
 		let path = request.path.clone();
 		response = get_file(request)
 			.map(|(content, end_of_file)| {
 				end_connection = end_of_file;
+				println!("[{client_ip}] sending file content");
 				Response::new(Status::Ok).with_content(content)
 			})
 			.unwrap_or_else(|| {
+				println!("[{client_ip}] file not found");
 				Response::new(Status::NotFound)
-					.with_content(Content::text(format!("FILE NOT FOUND - '{}'", path)))
+					.with_content(Content::text(format!("404 NOT FOUND - '{}'", path)))
 			})
 			.format(head_only);
 	} else {
+		println!("[{client_ip}] bad request");
 		response = Response::new(Status::BadRequest).format(false);
 	}
 
-	stream
-		.write_all(&response)
-		.unwrap_or_else(|_| println!("failed to respond"));
-	stream
-		.flush()
-		.unwrap_or_else(|_| println!("failed to flush"));
+	if stream.write_all(&response).is_err() || stream.flush().is_err() {
+		println!("[{client_ip}] failed to send response");
+	}
 	end_connection
 }
 
