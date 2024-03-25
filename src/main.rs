@@ -195,6 +195,11 @@ fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
 			content.push_str(&entry);
 			content
 		});
+	let parent = if relative_path != "/" {
+		r#"		<li><a href="..">../</a></li>"#
+	} else {
+		""
+	};
 	let page = format!(
 		r#"<!DOCTYPE html>
 <head>
@@ -204,8 +209,7 @@ fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
 <body>
 	<h3>Index of {relative_path}</h3>
 	<ul>
-		<li><a href="..">../</a></li>
-{list}	</ul>
+{parent}{list}	</ul>
 </body>
 </html>"#,
 	);
