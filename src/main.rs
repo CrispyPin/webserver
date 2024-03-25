@@ -113,10 +113,18 @@ fn handle_request(request: String, stream: &mut TcpStream) -> bool {
 fn get_file(request: Request) -> Option<(Content, bool)> {
 	const MAX_SIZE: usize = 1024 * 1024 * 8;
 
-	let path = PathBuf::from(format!("./{}", &request.path))
+	let current_dir = env::current_dir().unwrap();
+
+	let path = current_dir
+		.join(request.path.strip_prefix('/')?)
 		.canonicalize()
 		.ok()?;
-	if path.strip_prefix(env::current_dir().unwrap()).is_err() {
+
+	if path
+		.strip_prefix(current_dir.canonicalize().unwrap())
+		.is_err()
+	{
+		println!("illegal path: {}", request.path);
 		return None;
 	}
 
