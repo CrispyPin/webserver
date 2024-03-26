@@ -65,7 +65,7 @@ fn handle_connection(mut stream: TcpStream) {
 			println!("[{client_ip}] request over {MAX_REQUEST_SIZE} bytes, closing connection");
 			return;
 		}
-		if buffer.ends_with(b"\r\n\r\n") {
+		if buffer.ends_with(b"\r\n\r\n") || buffer.ends_with(b"\n\n") {
 			let request = String::from_utf8_lossy(&buffer).to_string();
 
 			println!("[{client_ip}] received {} bytes", buffer.len());
