@@ -49,6 +49,7 @@ impl Request {
 		let (path, version) = head.split_once(' ')?;
 		_ = version.strip_prefix("HTTP/1")?;
 
+		// parse http headers
 		let mut host = None;
 		let mut range = None;
 		for line in lines {
@@ -65,11 +66,22 @@ impl Request {
 		}
 		let host = host?;
 
-		//todo parse path %hex
+		// parse percent encoding
+		let mut path_bytes = path.bytes();
+		let mut path = Vec::with_capacity(path.len());
+		while let Some(byte) = path_bytes.next() {
+			if byte == b'%' {
+				let s = String::from_utf8(vec![path_bytes.next()?, path_bytes.next()?]).ok()?;
+				path.push(u8::from_str_radix(&s, 16).ok()?);
+			} else {
+				path.push(byte);
+			}
+		}
+		let path = String::from_utf8(path).ok()?;
 
 		Some(Self {
 			method,
-			path: path.to_owned(),
+			path,
 			host,
 			range,
 		})
@@ -89,9 +101,8 @@ impl Response {
 			if content.range.is_some() {
 				self.status = Status::PartialContent;
 			}
-			//do i need accept-ranges?
 			let mut buffer = format!(
-				"{}\r\nContent-Type: {}\r\nAccept-Ranges: bytes\r\nContent-Length: {}\r\n",
+				"{}\r\nContent-Type: {}\r\nContent-Length: {}\r\n",
 				self.status.header(),
 				content.mime_type,
 				content.bytes.len(),
