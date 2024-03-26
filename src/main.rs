@@ -183,7 +183,11 @@ fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
 		.ok()?
 		.flatten()
 		.filter_map(|d| {
-			let size = if d.file_type().ok()?.is_dir() {
+			let file_type = d.file_type().ok()?;
+			if !(file_type.is_file() || file_type.is_dir()) {
+				return None;
+			}
+			let size = if file_type.is_dir() {
 				None
 			} else {
 				Some(d.metadata().ok()?.len())
