@@ -163,6 +163,7 @@ impl Content {
 			"3gp" => "video/3gpp",
 			"3gp2" => "video/3gpp2",
 			"avi" => "video/x-msvideo",
+			"mov" => "video/mov",
 			"mp4" => "video/mp4",
 			"mpeg" => "video/mpeg",
 			"ogv" => "video/ogv",
