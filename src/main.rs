@@ -18,7 +18,13 @@ fn main() {
 	} else {
 		&args[1]
 	};
-	println!("Starting server on {:?}...\n", &host);
+	println!("Starting server on {:?}", &host);
+
+	if args.len() > 2 {
+		env::set_current_dir(&args[2]).expect("root dir specified must be valid path");
+		println!("Set root dir to {}", &args[2]);
+	}
+	println!();
 
 	let listener = TcpListener::bind(host).expect("Could not bind to address");
 
