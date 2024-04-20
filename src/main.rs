@@ -178,7 +178,7 @@ fn get_file(request: &Request) -> Option<(Content, bool)> {
 }
 
 fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
-	let mut dirs: Vec<_> = path
+	let mut items: Vec<_> = path
 		.read_dir()
 		.ok()?
 		.flatten()
@@ -196,28 +196,44 @@ fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
 			d.file_name().to_str().map(|s| (s.to_owned(), size))
 		})
 		.collect();
-	dirs.sort_by(|(name_a, size_a), (name_b, size_b)| {
+	items.sort_by(|(name_a, size_a), (name_b, size_b)| {
 		size_a
 			.is_some()
 			.cmp(&size_b.is_some())
 			.then(name_a.cmp(name_b))
 	});
-	let list = dirs
+	let items: Vec<_> = items
 		.into_iter()
 		.map(|(name, size)| {
-			let formatted_size = size.map(format_size).unwrap_or_default();
-			format!(
-				"<tr><td><a href=\"{href}\">{name}{trailing_slash}</a></td><td>{formatted_size}</td></tr>\n",
-				href = PathBuf::from(relative_path).join(&name).display(),
-				trailing_slash = if size.is_some() { "" } else { "/" },
-			)
+			let href = PathBuf::from(relative_path)
+				.join(&name)
+				.display()
+				.to_string();
+			let trailing_slash = if size.is_some() { "" } else { "/" };
+			let filename = format!("{name}{trailing_slash}");
+
+			let link = format!("<span><a href=\"{href}\">{filename}</a>");
+			let size = size.map(format_size).unwrap_or_default() + "</span>\n";
+			// NOTE: emojis in filenames will probably cause misalignment
+			let width = filename.chars().count();
+			(link, size, width)
 		})
-		.fold(String::new(), |mut content, entry| {
-			content.push_str(&entry);
-			content
-		});
+		.collect();
+
+	let name_width = items
+		.iter()
+		.map(|&(_, _, width)| width)
+		.max()
+		.unwrap_or_default();
+
+	let mut list = String::new();
+	for (link, filesize, width) in items {
+		let spaces = " ".repeat(name_width - width + 1);
+		let entry = format!("{link}{spaces}{filesize}");
+		list.push_str(&entry);
+	}
 	let parent = if relative_path != "/" {
-		"<tr><td><a href=\"..\">../</a></td><td></td></tr>"
+		"<span><a href=\"..\">../</a></span>\n"
 	} else {
 		""
 	};
@@ -228,29 +244,28 @@ fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
 	<title>Index of {relative_path}</title>
 	<style>
 		html {{ color-scheme: dark; }}
-		tr:nth-child(odd) {{ background-color: #333; }}
+		span:nth-child(odd) {{ background-color: #222; }}
+		pre {{ font-size: 1.8em; }}
 	</style>
 </head>
 <body>
 	<h3>Index of {relative_path}</h3>
-	<table>
-{parent}
-{list}
-	</table>
+	<pre>
+{parent}{list}</pre>
 </body>
-</html>"#,
+</html>"#
 	);
 	Some(Content::html(page))
 }
 
 fn format_size(bytes: u64) -> String {
 	if bytes < 1024 {
-		format!("{bytes} B")
+		format!("{bytes:>5}   B")
 	} else if bytes < 1024 * 1024 {
-		format!("{:.1} KiB", bytes as f64 / 1024.0)
+		format!("{:>5.1} KiB", bytes as f64 / 1024.0)
 	} else if bytes < 1024 * 1024 * 1024 {
-		format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
+		format!("{:>5.1} MiB", bytes as f64 / (1024.0 * 1024.0))
 	} else {
-		format!("{:.1} GiB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+		format!("{:>5.1} GiB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
 	}
 }
