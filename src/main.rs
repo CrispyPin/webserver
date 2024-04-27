@@ -5,10 +5,13 @@ use std::{
 	net::{TcpListener, TcpStream},
 	path::{Path, PathBuf},
 	thread,
+	time::Duration,
 };
 
 mod http;
 use http::{Content, Method, Request, RequestRange, Response, Status};
+
+const MAX_CONNECTIONS: usize = 256;
 
 fn main() {
 	let args: Vec<String> = env::args().collect();
@@ -36,6 +39,11 @@ fn main() {
 			Err(err) => println!("Error with incoming stream: {err}"),
 		}
 		threads.retain(|j| !j.is_finished());
+		while threads.len() >= MAX_CONNECTIONS {
+			threads.retain(|j| !j.is_finished());
+			thread::sleep(Duration::from_millis(500));
+			println!("Warning: maximum connections reached ({MAX_CONNECTIONS})")
+		}
 		println!("{} connections open", threads.len());
 	}
 }
