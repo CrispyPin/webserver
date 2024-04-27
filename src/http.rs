@@ -3,6 +3,7 @@ pub struct Request {
 	pub method: Method,
 	pub path: String,
 	pub host: String,
+	pub user_agent: String,
 	pub real_ip: Option<String>,
 	pub range: Option<RequestRange>,
 }
@@ -54,6 +55,7 @@ impl Request {
 		let mut host = None;
 		let mut range = None;
 		let mut real_ip = None;
+		let mut user_agent = String::new();
 		for line in lines {
 			if line.is_empty() {
 				break;
@@ -64,6 +66,7 @@ impl Request {
 				"host" => host = Some(value.to_owned()),
 				"range" => range = RequestRange::parse(value),
 				"x-real-ip" => real_ip = Some(value.to_owned()),
+				"user-agent" => user_agent = value.to_owned(),
 				_ => (),
 			}
 		}
@@ -88,6 +91,7 @@ impl Request {
 			host,
 			real_ip,
 			range,
+			user_agent,
 		})
 	}
 }

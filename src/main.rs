@@ -105,6 +105,7 @@ fn handle_request(request: &str, stream: &mut TcpStream) -> bool {
 	if let Some(request) = request {
 		let client_ip = format!("{socket_addr}");
 		let client_ip = request.real_ip.as_ref().unwrap_or(&client_ip);
+		println!("[{client_ip}] {}", request.user_agent);
 		println!("[{client_ip}] {} {}", request.method, request.path);
 		let head_only = request.method == Method::Head;
 		let path = request.path.clone();
