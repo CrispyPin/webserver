@@ -87,7 +87,7 @@ fn handle_connection(mut stream: TcpStream) {
 }
 
 fn handle_request(request: &str, stream: &mut TcpStream) -> bool {
-	let Ok(client_ip) = stream.peer_addr() else {
+	let Ok(socket_addr) = stream.peer_addr() else {
 		return true;
 	};
 	let request = Request::parse(request);
@@ -95,6 +95,8 @@ fn handle_request(request: &str, stream: &mut TcpStream) -> bool {
 	let mut end_connection = true;
 
 	if let Some(request) = request {
+		let client_ip = format!("{socket_addr}");
+		let client_ip = request.real_ip.as_ref().unwrap_or(&client_ip);
 		println!("[{client_ip}] {} {}", request.method, request.path);
 		let head_only = request.method == Method::Head;
 		let path = request.path.clone();
@@ -111,12 +113,12 @@ fn handle_request(request: &str, stream: &mut TcpStream) -> bool {
 			})
 			.format(head_only);
 	} else {
-		println!("[{client_ip}] bad request");
+		println!("[{socket_addr}] bad request");
 		response = Response::new(Status::BadRequest).format(false);
 	}
 
 	if stream.write_all(&response).is_err() || stream.flush().is_err() {
-		println!("[{client_ip}] failed to send response");
+		println!("[{socket_addr}] failed to send response");
 	}
 	end_connection
 }

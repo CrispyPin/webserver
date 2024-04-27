@@ -3,6 +3,7 @@ pub struct Request {
 	pub method: Method,
 	pub path: String,
 	pub host: String,
+	pub real_ip: Option<String>,
 	pub range: Option<RequestRange>,
 }
 
@@ -52,6 +53,7 @@ impl Request {
 		// parse http headers
 		let mut host = None;
 		let mut range = None;
+		let mut real_ip = None;
 		for line in lines {
 			if line.is_empty() {
 				break;
@@ -61,6 +63,7 @@ impl Request {
 			match key {
 				"host" => host = Some(value.to_owned()),
 				"range" => range = RequestRange::parse(value),
+				"x-real-ip" => real_ip = Some(value.to_owned()),
 				_ => (),
 			}
 		}
@@ -83,6 +86,7 @@ impl Request {
 			method,
 			path,
 			host,
+			real_ip,
 			range,
 		})
 	}
