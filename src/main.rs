@@ -137,9 +137,10 @@ fn get_file(request: &Request) -> Option<(Content, bool)> {
 
 	let current_dir = env::current_dir().unwrap();
 
-	let path = current_dir
-		.join(request.path.strip_prefix('/')?)
-		.canonicalize()
+	let request_path = request.path.strip_prefix('/')?;
+	let request_path_with_ext = format!("{request_path}.html");
+	let path = fs::canonicalize(current_dir.join(request_path))
+		.or_else(|_| fs::canonicalize(current_dir.join(request_path_with_ext)))
 		.ok()?;
 
 	if path
