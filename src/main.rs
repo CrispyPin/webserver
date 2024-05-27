@@ -5,7 +5,7 @@ use std::{
 	net::{TcpListener, TcpStream},
 	path::{Path, PathBuf},
 	thread,
-	time::Duration,
+	time::{Duration, SystemTime},
 };
 
 mod http;
@@ -53,7 +53,7 @@ fn handle_connection(mut stream: TcpStream) {
 	let Ok(client_ip) = stream.peer_addr() else {
 		return;
 	};
-	println!("[{client_ip}] new connection");
+	println!("[{client_ip}] new connection at {}", formatted_time_now());
 
 	let mut buffer = Vec::with_capacity(2048);
 	loop {
@@ -280,4 +280,47 @@ fn format_size(bytes: u64) -> String {
 	} else {
 		format!("{:>5.1} GiB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
 	}
+}
+
+fn formatted_time_now() -> String {
+	let unix_time = SystemTime::now()
+		.duration_since(SystemTime::UNIX_EPOCH)
+		.unwrap()
+		.as_secs();
+
+	let second = unix_time % 60;
+	let minute = unix_time / 60 % 60;
+	let hour = unix_time / 3600 % 24;
+
+	let days_since_epoch = unix_time / (3600 * 24);
+	let years_since_epoch = (days_since_epoch * 400) / 146097;
+	// 365.2425 days per year
+	/*
+	days = years * 365 + years/4 + years/400 - years/100
+	d = y*365 + y/4 + y/400 - y/100
+	d = (365y*400)/400 + 100y/400 + y/400 - 4y/400
+	d*400 = (365y*400) + 100y + y - 4y
+	d*400 = 400*365*y + 97*y
+	d*400 = y* (400*365 + 97)
+	d*400 = y*146097
+	years = (days * 400) / 146097
+	*/
+	let year = years_since_epoch + 1970;
+
+	let is_leap_year = (year % 4 == 0) && !((year % 100 == 0) && !(year % 400 == 0));
+	let feb = if is_leap_year { 28 } else { 27 };
+	let month_lengths = [31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+	let leap_days = years_since_epoch / 4;
+	let mut day = days_since_epoch - leap_days - years_since_epoch * 365;
+	let mut month = 0;
+	for i in 0..12 {
+		if day < month_lengths[i] {
+			month = i + 1;
+			break;
+		}
+		day -= month_lengths[i];
+	}
+
+	format!("{year}-{month:02}-{day:02}_{hour:02}:{minute:02}:{second:02}")
 }
