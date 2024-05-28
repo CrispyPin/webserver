@@ -308,7 +308,7 @@ fn formatted_time_now() -> String {
 	let year = years_since_epoch + 1970;
 
 	let is_leap_year = (year % 4 == 0) && !((year % 100 == 0) && !(year % 400 == 0));
-	let feb = if is_leap_year { 28 } else { 27 };
+	let feb = if is_leap_year { 29 } else { 28 };
 	let month_lengths = [31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 	let leap_days = years_since_epoch / 4;
@@ -317,6 +317,7 @@ fn formatted_time_now() -> String {
 	for i in 0..12 {
 		if day < month_lengths[i] {
 			month = i + 1;
+			day = day + 1;
 			break;
 		}
 		day -= month_lengths[i];
