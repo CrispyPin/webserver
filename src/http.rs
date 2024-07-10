@@ -37,9 +37,9 @@ pub enum Status {
 
 #[derive(Debug, Clone)]
 pub struct Content {
-	mime_type: &'static str,
-	range: Option<(usize, usize, usize)>,
-	bytes: Vec<u8>,
+	pub mime_type: &'static str,
+	pub range: Option<(usize, usize, usize)>,
+	pub bytes: Vec<u8>,
 }
 
 impl Request {
@@ -139,64 +139,19 @@ impl Response {
 
 impl Content {
 	pub fn html(text: String) -> Self {
-		Self::file("html", text.into_bytes())
-	}
-
-	pub fn text(text: String) -> Self {
-		Self::file("txt", text.into_bytes())
-	}
-
-	pub fn file(ext: &str, bytes: Vec<u8>) -> Self {
-		let content_type = match ext {
-			"txt" | "md" | "toml" => "text/plain",
-			"html" | "htm" => "text/html",
-			"css" => "text/css",
-
-			"apng" => "image/apng",
-			"bmp" => "image/bmp",
-			"gif" => "image/gif",
-			"jpeg" | "jpg" => "image/jpeg",
-			"png" => "image/png",
-			"svg" => "image/svg+xml",
-			"tif" | "tiff" => "image/tiff",
-			"webp" => "image/webp",
-
-			"aac" => "audio/aac",
-			"mp3" => "audio/mpeg",
-			"oga" | "ogg" => "audio/ogg",
-			"opus" => "audio/opus",
-			"wav" => "audio/wav",
-			"weba" => "audio/webm",
-
-			"3gp" => "video/3gpp",
-			"3gp2" => "video/3gpp2",
-			"avi" => "video/x-msvideo",
-			"mov" => "video/mov",
-			"mp4" => "video/mp4",
-			"mpeg" => "video/mpeg",
-			"ogv" => "video/ogv",
-			"webm" => "video/webm",
-
-			"json" => "application/json",
-			"gz" => "application/gzip",
-			_ => {
-				if bytes.is_ascii() {
-					"text/plain"
-				} else {
-					"application/octet-stream"
-				}
-			}
-		};
 		Self {
-			mime_type: content_type,
+			mime_type: "text/html",
 			range: None,
-			bytes,
+			bytes: text.into_bytes(),
 		}
 	}
 
-	pub fn with_range(mut self, range: Option<(usize, usize, usize)>) -> Self {
-		self.range = range;
-		self
+	pub fn text(text: String) -> Self {
+		Self {
+			mime_type: "text/plain",
+			range: None,
+			bytes: text.into_bytes(),
+		}
 	}
 }
 

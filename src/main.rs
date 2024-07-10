@@ -1,7 +1,7 @@
 use std::{
 	env,
 	fs::{self, File},
-	io::{BufReader, Read, Seek, Write},
+	io::{Read, Seek, Write},
 	net::{TcpListener, TcpStream},
 	path::{Path, PathBuf},
 	thread,
@@ -133,7 +133,7 @@ fn handle_request(request: &str, stream: &mut TcpStream) -> bool {
 }
 
 fn get_file(request: &Request) -> Option<(Content, bool)> {
-	const MAX_SIZE: usize = 1024 * 1024 * 8;
+	const MAX_PARTIAL_PACKET_SIZE: usize = 1024 * 1024 * 8;
 
 	let current_dir = env::current_dir().unwrap();
 
@@ -160,30 +160,47 @@ fn get_file(request: &Request) -> Option<(Content, bool)> {
 		}
 	} else if path.is_file() {
 		let ext = path.extension().unwrap_or_default().to_str()?;
-		let file = File::open(&path).ok()?;
-		let size = file.metadata().ok()?.len() as usize;
+		let mut file = File::open(&path).ok()?;
+		let file_size = file.metadata().ok()?.len() as usize;
+		let mime_type = mime_type(ext);
 
-		let mut buf = vec![0; MAX_SIZE];
-		let mut reader = BufReader::new(file);
+		let buffer_size = if mime_type.is_some() {
+			MAX_PARTIAL_PACKET_SIZE
+		} else {
+			file_size
+		};
+		let mut bytes = vec![0; buffer_size];
 		let start_pos = match request.range {
 			Some(RequestRange::From(p)) => p,
 			Some(RequestRange::Full(start, _end)) => start,
 			_ => 0,
 		};
-		reader
-			.seek(std::io::SeekFrom::Start(start_pos as u64))
-			.ok()?;
+		file.seek(std::io::SeekFrom::Start(start_pos as u64)).ok()?;
 
-		let size_read = reader.read(&mut buf).ok()?;
-		buf.truncate(size_read);
+		let size_read = file.read(&mut bytes).ok()?;
+		bytes.truncate(size_read);
 		let mut end_of_file = false;
-		let range = if size_read < size {
-			end_of_file = start_pos + size_read == size;
-			Some((start_pos, start_pos + size_read - 1, size))
+		let range = if size_read < file_size {
+			end_of_file = start_pos + size_read == file_size;
+			Some((start_pos, start_pos + size_read - 1, file_size))
 		} else {
 			None
 		};
-		Some((Content::file(ext, buf).with_range(range), end_of_file))
+		let mime_type = mime_type.unwrap_or_else(|| {
+			if bytes.is_ascii() {
+				"text/plain"
+			} else {
+				"application/octet-stream"
+			}
+		});
+		Some((
+			Content {
+				mime_type,
+				range,
+				bytes,
+			},
+			end_of_file,
+		))
 	} else {
 		None
 	}
@@ -263,7 +280,7 @@ fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
 <body>
 	<h3>Index of {relative_path}</h3>
 	<pre>
-{parent}{list}</pre>
+{parent}{list}	</pre>
 </body>
 </html>"#
 	);
@@ -324,4 +341,41 @@ fn formatted_time_now() -> String {
 	}
 
 	format!("{year}-{month:02}-{day:02}_{hour:02}:{minute:02}:{second:02}")
+}
+
+fn mime_type(ext: &str) -> Option<&'static str> {
+	let t = match ext {
+		"txt" | "md" | "toml" => "text/plain",
+		"html" | "htm" => "text/html",
+		"css" => "text/css",
+
+		"apng" => "image/apng",
+		"bmp" => "image/bmp",
+		"gif" => "image/gif",
+		"jpeg" | "jpg" => "image/jpeg",
+		"png" => "image/png",
+		"svg" => "image/svg+xml",
+		"tif" | "tiff" => "image/tiff",
+		"webp" => "image/webp",
+
+		"aac" => "audio/aac",
+		"mp3" => "audio/mpeg",
+		"oga" | "ogg" => "audio/ogg",
+		"opus" => "audio/opus",
+		"wav" => "audio/wav",
+		"weba" => "audio/webm",
+
+		"3gp" => "video/3gpp",
+		"3gp2" => "video/3gpp2",
+		"avi" => "video/x-msvideo",
+		"mov" => "video/mov",
+		"mp4" => "video/mp4",
+		"mpeg" => "video/mpeg",
+		"ogv" => "video/ogv",
+		"webm" => "video/webm",
+
+		"json" => "application/json",
+		_ => return None,
+	};
+	Some(t)
 }
