@@ -241,7 +241,7 @@ fn generate_index(relative_path: &str, path: &Path) -> Option<Content> {
 			let trailing_slash = if size.is_some() { "" } else { "/" };
 			let filename = format!("{name}{trailing_slash}");
 
-			let link = format!("<span><a href=\"{href}\">{filename}</a>");
+			let link = format!("<span><a href=\"{href}{trailing_slash}\">{filename}</a>");
 			let size = size.map(format_size).unwrap_or_default() + "</span>\n";
 			// NOTE: emojis in filenames will probably cause misalignment
 			let width = filename.chars().count();
