@@ -65,7 +65,7 @@ impl Request {
 			match key {
 				"host" => host = Some(value.to_owned()),
 				"range" => range = RequestRange::parse(value),
-				"x-real-ip" => real_ip = Some(value.to_owned()),
+				"x-forwarded-for" => real_ip = Some(value.to_owned()),
 				"user-agent" => user_agent = value.to_owned(),
 				_ => (),
 			}
